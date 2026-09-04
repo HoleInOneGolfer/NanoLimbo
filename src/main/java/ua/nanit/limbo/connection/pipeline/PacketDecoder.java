@@ -43,7 +43,7 @@ public class PacketDecoder extends MessageToMessageDecoder<ByteBuf> {
         updateState(this.state);
     }
 
-    @Override
+@Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf buf, List<Object> out) throws Exception {
         if (!ctx.channel().isActive() || mappings == null) return;
 
@@ -52,8 +52,21 @@ public class PacketDecoder extends MessageToMessageDecoder<ByteBuf> {
         Packet packet = mappings.getPacket(packetId);
         if (packet == null) {
             Log.debug("Undefined incoming packet: " + PacketUtils.toPacketId(packetId) + " [" + version + "|" + state + "]");
-            buf.skipBytes(buf.readableBytes()); // ADD THIS LINE: Consume unhandled bytes
-            return;                             // ADD THIS LINE: Return safely without failing
+
+            // Handle NeoForge/Forge handshake queries during CONFIGURATION or LOGIN
+            if (this.state == State.CONFIGURATION || this.state == State.LOGIN) {
+                // Send an empty Clientbound Custom Payload (0x00) back to satisfy the client check
+                ByteBuf ackBuf = ctx.alloc().buffer();
+                ByteMessage ackMsg = new ByteMessage(ackBuf);
+                ackMsg.writeVarInt(0x00); // Packet ID for Clientbound Custom Payload
+                ackMsg.writeString("minecraft:register"); // Acknowledge standard channels
+                ackMsg.writeByte(0); // 0 required payload data
+                
+                ctx.writeAndFlush(ackBuf);
+            }
+
+            buf.skipBytes(buf.readableBytes()); // Drain remaining buffer
+            return;
         }
 
         Log.debug("Received packet %s(%s) [%s|%s] (%d bytes)", packet.toString(), PacketUtils.toPacketId(packetId), version, state, msg.readableBytes());
