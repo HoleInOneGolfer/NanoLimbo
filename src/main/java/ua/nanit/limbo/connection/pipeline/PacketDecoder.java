@@ -1,49 +1,24 @@
-/*
- * Copyright (C) 2020 Nan1t
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 package ua.nanit.limbo.connection.pipeline;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.DecoderException;
-import io.netty.handler.codec.MessageToMessageDecoder;
-import lombok.NonNull;
-import ua.nanit.limbo.protocol.ByteMessage;
-import ua.nanit.limbo.protocol.Packet;
-import ua.nanit.limbo.protocol.registry.State;
-import ua.nanit.limbo.protocol.registry.Version;
-import ua.nanit.limbo.server.Log;
-import ua.nanit.limbo.util.PacketUtils;
-
+import io.netty.handler.codec.ByteToMessageDecoder;
 import java.util.List;
 
-public class PacketDecoder extends MessageToMessageDecoder<ByteBuf> {
+import ua.nanit.limbo.connection.ClientConnection;
+import ua.nanit.limbo.protocol.ByteMessage;
+import ua.nanit.limbo.protocol.PacketIn;
+import ua.nanit.limbo.protocol.registry.State;
 
-    private State state;
-    private State.PacketRegistry mappings;
-    private Version version;
+public class PacketDecoder extends ByteToMessageDecoder {
 
-    public PacketDecoder() {
-        updateVersion(Version.getMin());
-        this.state = State.HANDSHAKING;
-        updateState(this.state);
+    private final ClientConnection connection;
+
+    public PacketDecoder(ClientConnection connection) {
+        this.connection = connection;
     }
 
-@Override
+    @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
         if (!in.isReadable()) {
             return;
@@ -51,42 +26,31 @@ public class PacketDecoder extends MessageToMessageDecoder<ByteBuf> {
 
         int mark = in.readerIndex();
         try {
-            // Read VarInt Packet ID
-            int packetId = PacketUtils.readVarInt(in);
+            // NanoLimbo uses ByteMessage to read VarInts
+            int packetId = ByteMessage.readVarInt(in);
             State state = this.connection.getState();
 
             // Intercept Custom Payloads / Plugin Messages during CONFIGURATION or LOGIN phase
             if (state == State.CONFIGURATION || state == State.LOGIN) {
-                // In 1.20.2+ CONFIGURATION state, 0x00 is Serverbound Custom Payload (Plugin Message)
                 if (packetId == 0x00) {
-                    // Silently consume the remaining bytes of the custom payload packet
+                    // Silently consume the custom payload byte buffer
                     in.skipBytes(in.readableBytes());
                     return;
                 }
             }
 
-            // Normal NanoLimbo decoding
+            // Normal packet decoding
             PacketIn packet = state.getPacketIn(this.connection.getProtocolVersion(), packetId);
             if (packet != null) {
                 packet.read(in, this.connection.getProtocolVersion());
                 out.add(packet);
             } else {
-                // Ignore unknown packet IDs instead of closing the channel
                 in.skipBytes(in.readableBytes());
             }
 
         } catch (Exception e) {
-            // Prevent Netty channel closure on decode failure
+            // Catch decoding errors during handshake phase to prevent Netty channel closure
             in.readerIndex(in.writerIndex());
         }
-    }
-
-    public void updateVersion(@NonNull Version version) {
-        this.version = version;
-    }
-
-    public void updateState(@NonNull State state) {
-        this.state = state;
-        this.mappings = state.serverBound.getRegistry(version);
     }
 }

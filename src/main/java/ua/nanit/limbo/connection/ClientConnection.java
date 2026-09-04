@@ -97,8 +97,8 @@ public class ClientConnection extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        // Prevent closing connection on unexpected packet decoding exceptions
-        if (this.connection.getState() == State.CONFIGURATION) {
+        // Inside ClientConnection, use this.getState() directly instead of this.connection
+        if (this.getState() == ua.nanit.limbo.protocol.registry.State.CONFIGURATION) {
             return; // Ignore configuration state errors
         }
         ctx.close();
