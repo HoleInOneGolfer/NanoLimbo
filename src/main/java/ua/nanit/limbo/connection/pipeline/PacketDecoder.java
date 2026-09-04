@@ -53,16 +53,24 @@ public class PacketDecoder extends MessageToMessageDecoder<ByteBuf> {
         if (packet == null) {
             Log.debug("Undefined incoming packet: " + PacketUtils.toPacketId(packetId) + " [" + version + "|" + state + "]");
 
-            // Handle NeoForge/Forge handshake queries during CONFIGURATION or LOGIN
+            // Handle NeoForge/Forge CONFIGURATION handshakes
             if (this.state == State.CONFIGURATION || this.state == State.LOGIN) {
-                // Send an empty Clientbound Custom Payload (0x00) back to satisfy the client check
-                ByteBuf ackBuf = ctx.alloc().buffer();
-                ByteMessage ackMsg = new ByteMessage(ackBuf);
-                ackMsg.writeVarInt(0x00); // Packet ID for Clientbound Custom Payload
-                ackMsg.writeString("minecraft:register"); // Acknowledge standard channels
-                ackMsg.writeByte(0); // 0 required payload data
-                
-                ctx.writeAndFlush(ackBuf);
+                // Read the channel string from the custom payload
+                try {
+                    String channel = msg.readString();
+                    if (channel.startsWith("neoforge:") || channel.startsWith("fml:") || channel.startsWith("forge:")) {
+                        // Build an outbound Clientbound Custom Payload (0x00) echo
+                        ByteBuf ackBuf = ctx.alloc().buffer();
+                        ByteMessage ackMsg = new ByteMessage(ackBuf);
+                        ackMsg.writeVarInt(0x00); // Packet ID
+                        ackMsg.writeString(channel); // Match the exact channel queried by client
+                        ackMsg.writeByte(0); // 0 required mod channels / empty payload
+                        
+                        ctx.writeAndFlush(ackBuf);
+                    }
+                } catch (Exception ignored) {
+                    // Fallback if string reading fails
+                }
             }
 
             buf.skipBytes(buf.readableBytes()); // Drain remaining buffer
