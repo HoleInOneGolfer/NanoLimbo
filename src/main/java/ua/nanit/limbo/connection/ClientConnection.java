@@ -97,11 +97,11 @@ public class ClientConnection extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        if (channel.isActive()) {
-            Log.error("Encountered exception", cause);
-
-            ctx.close();
+        // Prevent closing connection on unexpected packet decoding exceptions
+        if (this.connection.getState() == State.CONFIGURATION) {
+            return; // Ignore configuration state errors
         }
+        ctx.close();
     }
 
     @Override

@@ -43,31 +43,42 @@ public class PacketDecoder extends MessageToMessageDecoder<ByteBuf> {
         updateState(this.state);
     }
 
-    @Override
-    protected void decode(ChannelHandlerContext ctx, ByteBuf buf, List<Object> out) throws Exception {
-        if (!ctx.channel().isActive() || mappings == null) return;
-
-        ByteMessage msg = new ByteMessage(buf);
-        int packetId = msg.readVarInt();
-        Packet packet = mappings.getPacket(packetId);
-        if (packet == null) {
-            Log.debug("Undefined incoming packet: " + PacketUtils.toPacketId(packetId) + " [" + version + "|" + state + "]");
+@Override
+    protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+        if (!in.isReadable()) {
             return;
         }
 
-        Log.debug("Received packet %s(%s) [%s|%s] (%d bytes)", packet.toString(), PacketUtils.toPacketId(packetId), version, state, msg.readableBytes());
-
+        int mark = in.readerIndex();
         try {
-            packet.decode(msg, version);
+            // Read VarInt Packet ID
+            int packetId = PacketUtils.readVarInt(in);
+            State state = this.connection.getState();
+
+            // Intercept Custom Payloads / Plugin Messages during CONFIGURATION or LOGIN phase
+            if (state == State.CONFIGURATION || state == State.LOGIN) {
+                // In 1.20.2+ CONFIGURATION state, 0x00 is Serverbound Custom Payload (Plugin Message)
+                if (packetId == 0x00) {
+                    // Silently consume the remaining bytes of the custom payload packet
+                    in.skipBytes(in.readableBytes());
+                    return;
+                }
+            }
+
+            // Normal NanoLimbo decoding
+            PacketIn packet = state.getPacketIn(this.connection.getProtocolVersion(), packetId);
+            if (packet != null) {
+                packet.read(in, this.connection.getProtocolVersion());
+                out.add(packet);
+            } else {
+                // Ignore unknown packet IDs instead of closing the channel
+                in.skipBytes(in.readableBytes());
+            }
+
         } catch (Exception e) {
-            throw new DecoderException("Cannot decode packet " + PacketUtils.toDetailedInfo(packet, packetId, version, state), e);
+            // Prevent Netty channel closure on decode failure
+            in.readerIndex(in.writerIndex());
         }
-
-        if (buf.isReadable()) {
-            throw new DecoderException("Packet " + PacketUtils.toDetailedInfo(packet, packetId, version, state) + " larger than expected, extra bytes: " + msg.readableBytes());
-        }
-
-        ctx.fireChannelRead(packet);
     }
 
     public void updateVersion(@NonNull Version version) {
