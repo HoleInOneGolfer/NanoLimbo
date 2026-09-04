@@ -52,7 +52,8 @@ public class PacketDecoder extends MessageToMessageDecoder<ByteBuf> {
         Packet packet = mappings.getPacket(packetId);
         if (packet == null) {
             Log.debug("Undefined incoming packet: " + PacketUtils.toPacketId(packetId) + " [" + version + "|" + state + "]");
-            return;
+            buf.skipBytes(buf.readableBytes()); // ADD THIS LINE: Consume unhandled bytes
+            return;                             // ADD THIS LINE: Return safely without failing
         }
 
         Log.debug("Received packet %s(%s) [%s|%s] (%d bytes)", packet.toString(), PacketUtils.toPacketId(packetId), version, state, msg.readableBytes());
